@@ -28,7 +28,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const peso=n=>(n<0?'-':'')+'₱'+Math.abs(n).toLocaleString('en-PH');
 const gen=n=>{const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',a=new Uint8Array(n);crypto.getRandomValues(a);return[...a].map(x=>c[x%c.length]).join('')};
 const fmt=c=>c.replace(/(.{4})(?=.)/g,'$1-');
-let me,opp,B,bets=[],chs=[],games=[],day=0,sel=null,per='week',subbed=false;
+let me,opp,B,bets=[],chs=[],games=[],day=0,sel=null,per='week',hf='all',subbed=false;
 const col=p=>p&&p.color==='blue'?'#6db8ff':'#ff9a5c';
 const dkey=i=>{const d=new Date();d.setDate(d.getDate()+i);return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')};
 const dlbl=i=>{if(!i)return'Today';const d=new Date();d.setDate(d.getDate()+i);return d.toLocaleDateString('en-PH',{month:'short',day:'numeric'})};
@@ -142,7 +142,9 @@ function view(){
  const pm=S?Math.round(50+50*sm.net/S):50,lead=Math.abs(sm.net);
  const rec=p=>{if(!p)return'';const s=stat(p.id,per);return`<div style="background:#0f1115;border-radius:10px;padding:10px"><div style="font-size:13px;color:${col(p)}">${esc(p.name)}</div><div class="num" style="font-size:26px">${s.w}W – ${s.l}L</div><div class="mut" style="margin-top:6px">Income <span class="g">${peso(s.inc)}</span></div><div class="mut">Lost <span class="r">${peso(s.lost)}</span></div></div>`};
  const nets=n=>`<span class="${n>=0?'g':'r'}">${n>=0?'+':''}${peso(n)}</span>`;
- const hist=chs.length?`<div class="card"><p class="lbl">Duels · Bets</p><div style="display:flex;flex-direction:column;gap:10px">${chs.slice(0,8).map(c=>{
+ const kind=c=>{if(c.status==='pending')return'pending';if(c.status==='rejected')return'done';const m=bets.find(b=>b.challenge_id===c.id&&b.player_id===me.id);return(!m||m.status==='open')?'locked':'done'};
+ const cnt={all:chs.length,pending:chs.filter(c=>kind(c)==='pending').length,locked:chs.filter(c=>kind(c)==='locked').length,done:chs.filter(c=>kind(c)==='done').length},fl=chs.filter(c=>hf==='all'||kind(c)===hf);
+ const hist=chs.length?`<div class="card"><p class="lbl">Duels · Bets</p><div style="display:flex;gap:6px;margin-bottom:12px">${[['all','All'],['pending','Pending'],['locked','Locked in'],['done','Done']].map(([k,l])=>`<button class="tab ${hf===k?'on':''}" style="flex:1;min-width:0;padding:0 4px" onclick="hf='${k}';view()">${l} ${cnt[k]}</button>`).join('')}</div><div style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:4px">${fl.slice(0,100).map(c=>{
   const bm=bets.filter(b=>b.challenge_id===c.id),mb=bm.find(b=>b.player_id===me.id),ob=bm.find(b=>b.player_id!==me.id),mine=c.from_player===me.id,amt=peso(Number(c.amount));
   const when=new Date(c.game_date).toLocaleDateString('en-PH',{month:'short',day:'numeric'})+' · '+new Date(c.game_date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
   let st,pk;
@@ -150,7 +152,7 @@ function view(){
   else if(c.status==='rejected'){st='<span class="mut">Rejected</span>';pk=`${esc(mine?me.name:nm)}: ${c.from_team}`}
   else{st=!mb?'Accepted':mb.status==='won'?`<span class="g">You won ${amt}</span>`:mb.status==='lost'?`<span class="r">You lost ${amt}</span>`:'<span style="color:#4cc38a">Locked in · waiting for final</span>';
    pk=mb&&ob?`${esc(me.name)}: ${mb.team} · ${esc(nm)}: ${ob.team}`:`${esc(mine?me.name:nm)}: ${c.from_team}`}
-  return`<div class="row" style="align-items:flex-start;${c.status==='rejected'?'opacity:.55':''}"><div><div style="font-size:14px;font-weight:600">${c.away_team} @ ${c.home_team} · ${amt}</div><div class="mut">${when}</div><div class="mut">${pk}</div></div><div style="font-size:13px;font-weight:600;text-align:right">${st}</div></div>`}).join('')}</div></div>`:'';
+  return`<div class="row" style="align-items:flex-start;${c.status==='rejected'?'opacity:.55':''}"><div><div style="font-size:14px;font-weight:600">${c.away_team} @ ${c.home_team} · ${amt}</div><div class="mut">${when}</div><div class="mut">${pk}</div></div><div style="font-size:13px;font-weight:600;text-align:right">${st}</div></div>`}).join('')||'<div class="mut">Wala pa dito.</div>'}</div></div>`:'';
  const sched=games.length?games.map(g=>{
   const live=g.state==='in',post=g.state==='post',t=new Date(g.date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
   const sub=post?`Final · ${g.a} ${g.as} – ${g.h} ${g.hs}`:live?`<span class="r">Live · ${esc(g.detail)}</span> · ${g.a} ${g.as} – ${g.h} ${g.hs}`:t;
