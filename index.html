@@ -109,6 +109,7 @@ function setAmt(n){sel.amt=n;view()}
 async function send(){
  const g=games.find(x=>x.id===sel.id),amt=Number($('#amt').value);
  if(!opp)return alert('Wait for Player 2 to join first');
+ if(chs.some(c=>c.game_id===g.id&&c.status!=='rejected'))return alert('This game already has a challenge');
  if(!sel.team)return alert('Select a team');if(!(amt>0))return alert('Enter an amount');
  const {error}=await sb.from('challenges').insert({battle_id:B.id,game_id:g.id,game_date:g.date,home_team:g.h,away_team:g.a,from_player:me.id,to_player:opp.id,from_team:sel.team,amount:amt});
  if(error)return alert(error.message);
@@ -141,10 +142,19 @@ function view(){
  const pm=S?Math.round(50+50*sm.net/S):50,lead=Math.abs(sm.net);
  const rec=p=>{if(!p)return'';const s=stat(p.id,per);return`<div style="background:#0f1115;border-radius:10px;padding:10px"><div style="font-size:13px;color:${col(p)}">${esc(p.name)}</div><div class="num" style="font-size:26px">${s.w}W – ${s.l}L</div><div class="mut" style="margin-top:6px">Income <span class="g">${peso(s.inc)}</span></div><div class="mut">Lost <span class="r">${peso(s.lost)}</span></div></div>`};
  const nets=n=>`<span class="${n>=0?'g':'r'}">${n>=0?'+':''}${peso(n)}</span>`;
+ const hist=chs.length?`<div class="card"><p class="lbl">Duels · Bets</p><div style="display:flex;flex-direction:column;gap:10px">${chs.slice(0,8).map(c=>{
+  const bm=bets.filter(b=>b.challenge_id===c.id),mb=bm.find(b=>b.player_id===me.id),ob=bm.find(b=>b.player_id!==me.id),mine=c.from_player===me.id,amt=peso(Number(c.amount));
+  const when=new Date(c.game_date).toLocaleDateString('en-PH',{month:'short',day:'numeric'})+' · '+new Date(c.game_date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
+  let st,pk;
+  if(c.status==='pending'){st=mine?`<span style="color:#ff9a5c">Waiting for ${esc(nm)}</span>`:'<span style="color:#ff9a5c">Needs your answer</span>';pk=`${esc(mine?me.name:nm)}: ${c.from_team}`}
+  else if(c.status==='rejected'){st='<span class="mut">Rejected</span>';pk=`${esc(mine?me.name:nm)}: ${c.from_team}`}
+  else{st=!mb?'Accepted':mb.status==='won'?`<span class="g">You won ${amt}</span>`:mb.status==='lost'?`<span class="r">You lost ${amt}</span>`:'<span style="color:#4cc38a">Locked in · waiting for final</span>';
+   pk=mb&&ob?`${esc(me.name)}: ${mb.team} · ${esc(nm)}: ${ob.team}`:`${esc(mine?me.name:nm)}: ${c.from_team}`}
+  return`<div class="row" style="align-items:flex-start;${c.status==='rejected'?'opacity:.55':''}"><div><div style="font-size:14px;font-weight:600">${c.away_team} @ ${c.home_team} · ${amt}</div><div class="mut">${when}</div><div class="mut">${pk}</div></div><div style="font-size:13px;font-weight:600;text-align:right">${st}</div></div>`}).join('')}</div></div>`:'';
  const sched=games.length?games.map(g=>{
   const live=g.state==='in',post=g.state==='post',t=new Date(g.date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
   const sub=post?`Final · ${g.a} ${g.as} – ${g.h} ${g.hs}`:live?`<span class="r">Live · ${esc(g.detail)}</span> · ${g.a} ${g.as} – ${g.h} ${g.hs}`:t;
-  const open=sel&&sel.id===g.id;
+  const open=sel&&sel.id===g.id,ch=chs.find(c=>c.game_id===g.id&&c.status!=='rejected');
   return open?`<div style="background:#0f1115;border:1px solid #ff7a2f;border-radius:10px;padding:12px">
    <div style="font-weight:600;margin-bottom:10px">${g.a} @ ${g.h} <span class="mut">${sub}</span></div>
    <p class="lbl" style="margin-bottom:6px">Select team</p><div style="display:flex;gap:8px;margin-bottom:12px">${[g.a,g.h].map(t=>`<button class="tab ${sel.team===t?'on':''}" style="flex:1" onclick="setTeam('${t}')">${t}</button>`).join('')}</div>
@@ -152,7 +162,7 @@ function view(){
    <div style="display:flex;gap:8px;margin-bottom:12px">${[100,500,1000].map(n=>`<button class="tab" style="flex:1" onclick="setAmt(${n})">₱${n.toLocaleString()}</button>`).join('')}</div>
    <button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00;margin-bottom:8px" onclick="send()">Send request to ${esc(nm)}</button>
    <button class="btn" style="width:100%;background:transparent;color:#8b93a1" onclick="pick('${g.id}')">Cancel</button></div>`
-  :`<div class="row"><div><div style="font-size:14px;font-weight:600">${g.a} @ ${g.h}</div><div class="mut">${sub}</div></div>${post?'':`<button class="btn" style="width:96px;background:#4cc38a;color:#06210f" onclick="pick('${g.id}')">Pick</button>`}</div>`
+  :`<div class="row"><div><div style="font-size:14px;font-weight:600">${g.a} @ ${g.h}</div><div class="mut">${sub}</div></div>${post?'':ch?`<button class="btn" disabled style="width:96px;background:#262b35;color:#6b7280;cursor:not-allowed">${ch.status==='pending'?'Pending':'Locked in'}</button>`:`<button class="btn" style="width:96px;background:#4cc38a;color:#06210f" onclick="pick('${g.id}')">Pick</button>`}</div>`
  }).join(''):'<div class="mut">No games on this date.</div>';
  A.innerHTML=`
  <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="num" style="font-size:28px;letter-spacing:.04em">BET DUEL</div><div class="mut">Season ${esc(B.season)} · ${esc(B.name)}</div></div>
@@ -166,6 +176,7 @@ function view(){
  <div class="card"><div style="display:flex;gap:4px;background:#0f1115;border-radius:12px;padding:3px;margin-bottom:12px">${[['week','Week'],['month','Month'],['year','Year'],['career','Career']].map(([k,l])=>`<button class="tab ${per===k?'on':''}" style="flex:1;border:0" onclick="per='${k}';view()">${l}</button>`).join('')}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${rec(me)}${rec(opp)}</div></div>
  ${inbox.length?`<div id="inbox" class="card" style="border-color:#ff7a2f"><p class="lbl" style="color:#ff9a5c">Challenge request${inbox.length>1?'s':''}</p>${inbox.map(c=>`<div style="margin-bottom:12px"><div style="font-size:15px;font-weight:600">${esc(nm)} wants ${c.from_team} (${c.away_team} @ ${c.home_team})</div><div class="mut" style="margin:2px 0 10px">Stake ${peso(Number(c.amount))} · you get ${c.from_team===c.home_team?c.away_team:c.home_team}</div><div style="display:flex;gap:10px"><button class="btn" style="flex:1;background:#4cc38a;color:#06210f" onclick="answer('${c.id}',true)">Accept</button><button class="btn" style="flex:1;background:#e5484d;color:#fff" onclick="answer('${c.id}',false)">Reject</button></div></div>`).join('')}</div>`:''}
+ ${hist}
  <div class="card"><p class="lbl">NBA games · Schedule</p><div style="display:flex;gap:8px;overflow-x:auto;margin-bottom:12px">${[0,1,2,3,4,5,6].map(i=>`<button class="tab ${day===i?'on':''}" onclick="day=${i};sel=null;loadGames()">${dlbl(i)}</button>`).join('')}</div>
   ${out.length?`<div class="mut" style="margin-bottom:10px">${out.length} request${out.length>1?'s':''} waiting for ${esc(nm)}</div>`:''}
   <div style="display:flex;flex-direction:column;gap:10px">${sched}</div></div>
