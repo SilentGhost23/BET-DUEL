@@ -181,7 +181,7 @@ async function addDraft(id){
 function rmDraft(k,id){dr[k]=dr[k].filter(x=>x.id!==id);view()}
 async function lockAw(k){
  if(!canPick())return alert('Closed na ang picks (cutoff Dec 1)');
- const lbl=k==='mvp'?'MVP':'Rookie of the Year',amt=Number(damt[k]),d=dr[k];
+ const lbl=k==='mvp'?'MVP':'Rookie of the Year',os=opp&&stakes.find(x=>x.award===k&&x.player_id===opp.id),amt=os?Number(os.amount):Number(damt[k]),d=dr[k];
  if(!d.length)return alert('Add at least 1 player');if(!(amt>0))return alert('Enter an amount');
  if(!confirm('Lock '+d.map(x=>x.name).join(', ')+' for '+lbl+' with '+peso(amt)+'? Final na, hindi na mababago.'))return;
  const s=await sb.from('award_stakes').insert({battle_id:B.id,player_id:me.id,award:k,amount:amt}).select().single();
@@ -239,7 +239,7 @@ function view(){
   const plus=`<button aria-label="Add ${l} pick" class="btn" style="width:44px;padding:0;background:transparent;border:1px dashed #ff7a2f;color:#ff9a5c;font-size:22px" onclick="openAw('${k}')">+</button>`;
   const head=locked?`<div style="display:flex;align-items:center;gap:10px"><span class="mut">Locked · <b style="color:#e9ecf1">${peso(Number(ms?ms.amount:0))}</b></span>${mine.length<3&&!res&&canPick()?plus:''}</div>`:!canPick()?'<span class="mut">Closed · Dec 1</span>':d.length<3?plus:'<span class="mut">Max 3</span>';
   const myChips=locked?mine.map(p=>chip(p.nba_player_name,col(me))).join(''):d.map(x=>chip(x.name,col(me),`<button aria-label="Remove" onclick="rmDraft('${k}','${x.id}')" style="border:0;background:transparent;color:inherit;font-size:16px;padding:0;cursor:pointer">×</button>`)).join('')||none;
-  const lockBox=!locked&&d.length&&canPick()?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${damt[k]}" oninput="damt['${k}']=this.value"><button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
+  const lockBox=!locked&&d.length&&canPick()?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${os?os.amount:damt[k]}" ${os?'readonly':''} oninput="damt['${k}']=this.value">${os?`<div class="mut" style="margin-bottom:8px">Same stake as ${esc(nm)}: ${peso(Number(os.amount))}</div>`:''}<button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
   const outcome=res?`<div style="margin-top:10px;font-size:13px">Winner: <b>${esc(res.nba_player_name)}</b> · ${!pay||pay.result==='tabla'?'<span class="mut">Tabla</span>':pay.result==='won'?`<span class="g">You won ${peso(Number(pay.profit))}</span>`:`<span class="r">You lost ${peso(-Number(pay.profit))}</span>`}</div>`
    :`${may?'<div style="margin-top:10px;font-size:12px;color:#ff9a5c">Mid-to-late May na, i-declare na ang winner.</div>':''}<button class="btn" ${may?'':'disabled'} style="width:100%;margin-top:10px;background:${may?'#4cc38a':'#262b35'};color:${may?'#06210f':'#6b7280'};${may?'':'cursor:not-allowed'}" onclick="openWin('${k}')">${may?'Declare winner':'Declare winner · locked until May 15'}</button>${search('win')}`;
   return`<div style="background:#0f1115;border-radius:10px;padding:10px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:600">${l}</div>${head}</div>
