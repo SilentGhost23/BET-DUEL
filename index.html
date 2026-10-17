@@ -127,30 +127,35 @@ async function answer(id,ok){
 function cp(t){navigator.clipboard.writeText(t).then(()=>alert('Copied'))}
 
 // ---------- awards ----------
+let nbaS='idle',nbaN=0;
+const canDeclare=()=>{const y=parseInt(String(B.season).slice(0,4));return isNaN(y)?false:Date.now()>=new Date(y+1,4,15).getTime()};
 async function loadNBA(){
  if(NBA.length)return;
  try{const c=JSON.parse(localStorage.bd_nba||'null');if(c&&Date.now()-c.t<6048e5&&c.list.length){NBA=c.list;return}}catch(e){}
- try{
-  const t=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams').then(r=>r.json());
-  const ids=t.sports[0].leagues[0].teams.map(x=>x.team.id);
-  const rs=await Promise.all(ids.map(id=>fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/'+id+'/roster').then(r=>r.json()).catch(()=>null)));
-  const L=[];
-  rs.forEach(r=>{if(!r)return;const ab=r.team&&r.team.abbreviation;(r.athletes||[]).forEach(a=>L.push({id:String(a.id),name:a.displayName,team:ab,pos:a.position&&a.position.abbreviation,rookie:!!(a.experience&&a.experience.years===0)}))});
-  NBA=L.sort((a,b)=>a.name.localeCompare(b.name));
-  localStorage.bd_nba=JSON.stringify({t:Date.now(),list:NBA});
- }catch(e){NBA=[]}
+ nbaS='loading';nbaN=0;updRes();
+ const base='https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams',ids=[];
+ try{const t=await fetch(base).then(r=>r.json());t.sports[0].leagues[0].teams.forEach(x=>ids.push(String(x.team.id)))}catch(e){}
+ if(!ids.length)for(let i=1;i<=30;i++)ids.push(String(i));
+ const M=new Map();
+ await Promise.allSettled(ids.map(id=>fetch(base+'/'+id+'/roster').then(r=>r.json()).then(r=>{
+  const ab=r.team&&r.team.abbreviation;
+  (r.athletes||[]).forEach(a=>{if(a&&a.id)M.set(String(a.id),{id:String(a.id),name:a.displayName||a.fullName,team:ab,pos:a.position&&a.position.abbreviation,rookie:!!(a.experience&&a.experience.years===0)})});
+ }).finally(()=>{nbaN++;updRes()})));
+ NBA=[...M.values()].sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+ nbaS=NBA.length?'ok':'err';
+ if(NBA.length)try{localStorage.bd_nba=JSON.stringify({t:Date.now(),list:NBA})}catch(e){}
 }
 function openAw(k){aw=k;am='pick';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
 function updRes(){
  const el=$('#awres');if(!el)return;
- if(!NBA.length){el.innerHTML='<div class="mut">Loading players...</div>';return}
+ if(!NBA.length){el.innerHTML=nbaS==='err'?'<div class="mut">Hindi ma-load ang players.</div><button class="btn" style="width:100%;background:#262b35;color:#e9ecf1;margin-top:6px" onclick="loadNBA().then(updRes)">Retry</button>':`<div class="mut">Loading players... ${nbaN}/30</div>`;return}
  const q=aq.toLowerCase();let L=NBA;
  if(aw==='roy'){const r=L.filter(x=>x.rookie);L=r.length?r:L}
  L=L.filter(x=>x.name.toLowerCase().includes(q)).slice(0,8);
  const taken=am==='pick'?dr[aw].map(d=>d.id):[];
  el.innerHTML=L.map(x=>{const t=taken.includes(x.id);return`<button class="row" style="border:0;color:#e9ecf1;text-align:left;cursor:pointer;min-height:44px;width:100%;${t?'opacity:.4':''}" ${t?'disabled':''} onclick="pickRes('${x.id}')"><span style="font-weight:600">${esc(x.name)}</span><span class="mut">${esc(x.team||'')}${x.pos?' · '+esc(x.pos):''}</span></button>`}).join('')||'<div class="mut">No match</div>';
 }
-function openWin(k){aw=k;am='win';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
+function openWin(k){if(!canDeclare())return alert('Locked hanggang May 15');aw=k;am='win';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
 function pickRes(id){am==='win'?declare(id):addDraft(id)}
 function addDraft(id){
  const x=NBA.find(y=>y.id===id),d=dr[aw];
@@ -170,6 +175,7 @@ async function lockAw(k){
  dr[k]=[];load();
 }
 async function declare(id){
+ if(!canDeclare())return alert('Locked hanggang May 15');
  const x=NBA.find(y=>y.id===id),k=aw,lbl=k==='mvp'?'MVP':'Rookie of the Year';
  if(!confirm('Declare '+x.name+' as the '+lbl+' winner? Final na ito para sa dalawa.'))return;
  const ids=pid=>picks.filter(p=>p.award===k&&p.player_id===pid).map(p=>p.nba_player_id);
@@ -204,7 +210,7 @@ function view(){
  const nets=n=>`<span class="${n>=0?'g':'r'}">${n>=0?'+':''}${peso(n)}</span>`;
  const kind=c=>{if(c.status==='pending')return'pending';if(c.status==='rejected')return'done';const m=bets.find(b=>b.challenge_id===c.id&&b.player_id===me.id);return(!m||m.status==='open')?'locked':'done'};
  const cnt={all:chs.length,pending:chs.filter(c=>kind(c)==='pending').length,locked:chs.filter(c=>kind(c)==='locked').length,done:chs.filter(c=>kind(c)==='done').length},fl=chs.filter(c=>hf==='all'||kind(c)===hf);
- const may=new Date().getMonth()===4&&new Date().getDate()>=15;
+ const may=canDeclare();
  const awb=(k,l)=>{
   const mine=picks.filter(p=>p.award===k&&p.player_id===me.id),th=picks.filter(p=>p.award===k&&p.player_id!==me.id);
   const ms=stakes.find(s=>s.award===k&&s.player_id===me.id),os=opp&&stakes.find(s=>s.award===k&&s.player_id===opp.id);
@@ -216,7 +222,7 @@ function view(){
   const myChips=locked?mine.map(p=>chip(p.nba_player_name,col(me))).join(''):d.map(x=>chip(x.name,col(me),`<button aria-label="Remove" onclick="rmDraft('${k}','${x.id}')" style="border:0;background:transparent;color:inherit;font-size:16px;padding:0;cursor:pointer">×</button>`)).join('')||none;
   const lockBox=!locked&&d.length?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${damt[k]}" oninput="damt['${k}']=this.value"><button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
   const outcome=res?`<div style="margin-top:10px;font-size:13px">Winner: <b>${esc(res.nba_player_name)}</b> · ${!pay||pay.result==='tabla'?'<span class="mut">Tabla</span>':pay.result==='won'?`<span class="g">You won ${peso(Number(pay.profit))}</span>`:`<span class="r">You lost ${peso(-Number(pay.profit))}</span>`}</div>`
-   :`${may?'<div style="margin-top:10px;font-size:12px;color:#ff9a5c">Mid-to-late May na, i-declare na ang winner.</div>':''}<button class="btn" style="width:100%;margin-top:10px;background:${may?'#4cc38a':'#262b35'};color:${may?'#06210f':'#e9ecf1'}" onclick="openWin('${k}')">Declare winner</button>${search('win')}`;
+   :`${may?'<div style="margin-top:10px;font-size:12px;color:#ff9a5c">Mid-to-late May na, i-declare na ang winner.</div>':''}<button class="btn" ${may?'':'disabled'} style="width:100%;margin-top:10px;background:${may?'#4cc38a':'#262b35'};color:${may?'#06210f':'#6b7280'};${may?'':'cursor:not-allowed'}" onclick="openWin('${k}')">${may?'Declare winner':'Declare winner · locked until May 15'}</button>${search('win')}`;
   return`<div style="background:#0f1115;border-radius:10px;padding:10px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:600">${l}</div>${head}</div>
   <div class="mut" style="margin-bottom:4px;color:${col(me)}">${esc(me.name)}</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${myChips}</div>${search('pick')}${lockBox}
   <div class="mut" style="margin:10px 0 4px;color:${col(opp)}">${esc(nm)}${os?' · '+peso(Number(os.amount)):''}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${th.map(p=>chip(p.nba_player_name,col(opp))).join('')||none}</div>${outcome}</div>`};
