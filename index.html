@@ -128,6 +128,7 @@ function cp(t){navigator.clipboard.writeText(t).then(()=>alert('Copied'))}
 
 // ---------- awards ----------
 let nbaS='idle',nbaN=0;
+const canPick=()=>{const y=parseInt(String(B.season).slice(0,4));return isNaN(y)?true:Date.now()<new Date(y,11,1).getTime()};
 const canDeclare=()=>{const y=parseInt(String(B.season).slice(0,4));return isNaN(y)?false:Date.now()>=new Date(y+1,4,15).getTime()};
 async function loadNBA(){
  if(NBA.length)return;
@@ -145,26 +146,37 @@ async function loadNBA(){
  nbaS=NBA.length?'ok':'err';
  if(NBA.length)try{localStorage.bd_nba=JSON.stringify({t:Date.now(),list:NBA})}catch(e){}
 }
-function openAw(k){aw=k;am='pick';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
+function openAw(k){if(!canPick())return alert('Closed na ang picks (cutoff Dec 1)');aw=k;am='pick';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
 function updRes(){
  const el=$('#awres');if(!el)return;
  if(!NBA.length){el.innerHTML=nbaS==='err'?'<div class="mut">Hindi ma-load ang players.</div><button class="btn" style="width:100%;background:#262b35;color:#e9ecf1;margin-top:6px" onclick="loadNBA().then(updRes)">Retry</button>':`<div class="mut">Loading players... ${nbaN}/30</div>`;return}
  const q=aq.toLowerCase();let L=NBA;
  if(aw==='roy'){const r=L.filter(x=>x.rookie);L=r.length?r:L}
  L=L.filter(x=>x.name.toLowerCase().includes(q)).slice(0,8);
- const taken=am==='pick'?dr[aw].map(d=>d.id):[];
+ const taken=am==='pick'?dr[aw].map(d=>d.id).concat(picks.filter(p=>p.award===aw&&p.player_id===me.id).map(p=>p.nba_player_id)):[];
  el.innerHTML=L.map(x=>{const t=taken.includes(x.id);return`<button class="row" style="border:0;color:#e9ecf1;text-align:left;cursor:pointer;min-height:44px;width:100%;${t?'opacity:.4':''}" ${t?'disabled':''} onclick="pickRes('${x.id}')"><span style="font-weight:600">${esc(x.name)}</span><span class="mut">${esc(x.team||'')}${x.pos?' · '+esc(x.pos):''}</span></button>`}).join('')||'<div class="mut">No match</div>';
 }
 function openWin(k){if(!canDeclare())return alert('Locked hanggang May 15');aw=k;am='win';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
 function pickRes(id){am==='win'?declare(id):addDraft(id)}
-function addDraft(id){
- const x=NBA.find(y=>y.id===id),d=dr[aw];
+async function addDraft(id){
+ if(!canPick())return alert('Closed na ang picks (cutoff Dec 1)');
+ const x=NBA.find(y=>y.id===id),k=aw,d=dr[k],lbl=k==='mvp'?'MVP':'Rookie of the Year';
+ const mineP=picks.filter(p=>p.award===k&&p.player_id===me.id);
+ if(mineP.length){
+  if(results.find(r=>r.award===k))return alert('Winner already declared');
+  if(mineP.length>=3)return alert('Max 3 picks');
+  if(!confirm('Add '+x.name+' as another '+lbl+' pick? Final na, hindi na mababago.'))return;
+  const {error}=await sb.from('award_picks').insert({battle_id:B.id,player_id:me.id,award:k,nba_player_id:x.id,nba_player_name:x.name});
+  if(error)return alert(error.message);
+  aw=null;load();return;
+ }
  if(d.length>=3)return alert('Max 3 picks');
  if(!d.some(y=>y.id===id))d.push({id:x.id,name:x.name});
  aw=null;view();
 }
 function rmDraft(k,id){dr[k]=dr[k].filter(x=>x.id!==id);view()}
 async function lockAw(k){
+ if(!canPick())return alert('Closed na ang picks (cutoff Dec 1)');
  const lbl=k==='mvp'?'MVP':'Rookie of the Year',amt=Number(damt[k]),d=dr[k];
  if(!d.length)return alert('Add at least 1 player');if(!(amt>0))return alert('Enter an amount');
  if(!confirm('Lock '+d.map(x=>x.name).join(', ')+' for '+lbl+' with '+peso(amt)+'? Final na, hindi na mababago.'))return;
@@ -218,15 +230,16 @@ function view(){
   const chip=(t,c,x)=>`<span style="display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:16px;border:1px solid ${c};color:${c};font-size:13px;font-weight:600">${esc(t)}${x||''}</span>`;
   const none='<span class="mut">Wala pa</span>';
   const search=m=>aw===k&&am===m?`<div style="margin-top:10px"><input id="aq" placeholder="Search player..." value="${esc(aq)}" oninput="aq=this.value;updRes()" style="margin-bottom:6px"><div id="awres" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto"></div><button class="btn" style="width:100%;background:transparent;color:#8b93a1;margin-top:6px" onclick="aw=null;view()">Close</button></div>`:'';
-  const head=locked?`<span class="mut">Locked · <b style="color:#e9ecf1">${peso(Number(ms?ms.amount:0))}</b></span>`:d.length<3?`<button aria-label="Add ${l} pick" class="btn" style="width:44px;padding:0;background:transparent;border:1px dashed #ff7a2f;color:#ff9a5c;font-size:22px" onclick="openAw('${k}')">+</button>`:'<span class="mut">Max 3</span>';
+  const plus=`<button aria-label="Add ${l} pick" class="btn" style="width:44px;padding:0;background:transparent;border:1px dashed #ff7a2f;color:#ff9a5c;font-size:22px" onclick="openAw('${k}')">+</button>`;
+  const head=locked?`<div style="display:flex;align-items:center;gap:10px"><span class="mut">Locked · <b style="color:#e9ecf1">${peso(Number(ms?ms.amount:0))}</b></span>${mine.length<3&&!res&&canPick()?plus:''}</div>`:!canPick()?'<span class="mut">Closed · Dec 1</span>':d.length<3?plus:'<span class="mut">Max 3</span>';
   const myChips=locked?mine.map(p=>chip(p.nba_player_name,col(me))).join(''):d.map(x=>chip(x.name,col(me),`<button aria-label="Remove" onclick="rmDraft('${k}','${x.id}')" style="border:0;background:transparent;color:inherit;font-size:16px;padding:0;cursor:pointer">×</button>`)).join('')||none;
-  const lockBox=!locked&&d.length?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${damt[k]}" oninput="damt['${k}']=this.value"><button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
+  const lockBox=!locked&&d.length&&canPick()?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${damt[k]}" oninput="damt['${k}']=this.value"><button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
   const outcome=res?`<div style="margin-top:10px;font-size:13px">Winner: <b>${esc(res.nba_player_name)}</b> · ${!pay||pay.result==='tabla'?'<span class="mut">Tabla</span>':pay.result==='won'?`<span class="g">You won ${peso(Number(pay.profit))}</span>`:`<span class="r">You lost ${peso(-Number(pay.profit))}</span>`}</div>`
    :`${may?'<div style="margin-top:10px;font-size:12px;color:#ff9a5c">Mid-to-late May na, i-declare na ang winner.</div>':''}<button class="btn" ${may?'':'disabled'} style="width:100%;margin-top:10px;background:${may?'#4cc38a':'#262b35'};color:${may?'#06210f':'#6b7280'};${may?'':'cursor:not-allowed'}" onclick="openWin('${k}')">${may?'Declare winner':'Declare winner · locked until May 15'}</button>${search('win')}`;
   return`<div style="background:#0f1115;border-radius:10px;padding:10px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:600">${l}</div>${head}</div>
   <div class="mut" style="margin-bottom:4px;color:${col(me)}">${esc(me.name)}</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${myChips}</div>${search('pick')}${lockBox}
   <div class="mut" style="margin:10px 0 4px;color:${col(opp)}">${esc(nm)}${os?' · '+peso(Number(os.amount)):''}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${th.map(p=>chip(p.nba_player_name,col(opp))).join('')||none}</div>${outcome}</div>`};
- const awardsHtml=`<p class="lbl">Season awards · Final picks</p>`+awb('mvp','MVP')+awb('roy','Rookie of the Year');
+ const awardsHtml=`<p class="lbl">Season awards · Final picks</p><div class="mut" style="margin:-4px 0 10px">${canPick()?'Picks open hanggang Dec 1':'Closed na ang picks (Dec 1 cutoff)'}</div>`+awb('mvp','MVP')+awb('roy','Rookie of the Year');
  const hist=`<div class="card">${awardsHtml}<p class="lbl">Duels · Bets</p><div style="display:flex;gap:6px;margin-bottom:12px">${[['all','All'],['pending','Pending'],['locked','Locked in'],['done','Done']].map(([k,l])=>`<button class="tab ${hf===k?'on':''}" style="flex:1;min-width:0;padding:0 4px" onclick="hf='${k}';view()">${l} ${cnt[k]}</button>`).join('')}</div><div style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:4px">${fl.slice(0,100).map(c=>{
   const bm=bets.filter(b=>b.challenge_id===c.id),mb=bm.find(b=>b.player_id===me.id),ob=bm.find(b=>b.player_id!==me.id),mine=c.from_player===me.id,amt=peso(Number(c.amount));
   const when=new Date(c.game_date).toLocaleDateString('en-PH',{month:'short',day:'numeric'})+' · '+new Date(c.game_date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
