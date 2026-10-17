@@ -16,6 +16,12 @@
 input{width:100%;height:46px;border-radius:10px;border:1px solid #262b35;background:#0f1115;color:#e9ecf1;padding:0 12px;font:500 16px 'Barlow',sans-serif;margin-bottom:10px}
 .row{display:flex;align-items:center;justify-content:space-between;background:#0f1115;border-radius:10px;padding:10px;gap:8px}
 .mut{font-size:12px;color:#8b93a1}.g{color:#4cc38a}.r{color:#ff6b70}
+@keyframes fxfall{from{transform:translateY(-10vh) rotate(0)}to{transform:translateY(110vh) rotate(360deg)}}
+@keyframes fxrise{from{transform:translateY(110vh)}to{transform:translateY(-20vh)}}
+@keyframes fxstamp{0%{transform:scale(6) rotate(-20deg);opacity:0}60%{transform:scale(1) rotate(-8deg);opacity:1}80%{transform:scale(1.15) rotate(-8deg)}100%{transform:scale(1) rotate(-8deg);opacity:1}}
+@keyframes fxslide{from{transform:translateX(110vw)}to{transform:translateX(-120%)}}
+@keyframes fxpop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes fxshk{0%,100%{transform:translate(0)}20%{transform:translate(-12px,6px) rotate(-1deg)}40%{transform:translate(10px,-8px) rotate(1deg)}60%{transform:translate(-8px,-6px)}80%{transform:translate(8px,8px)}}
 </style></head><body><div id="app"></div>
 <script>
 // ====== CONFIG: ilagay dito ang Supabase URL at anon key ======
@@ -77,6 +83,8 @@ async function boot(){
  await load();await loadGames();
  chans.forEach(c=>sb.removeChannel(c));
  chans=['challenges','bets','award_picks','award_stakes','award_results','award_payouts'].map(t=>sb.channel('bd_'+t+'_'+Date.now()).on('postgres_changes',{event:'*',schema:'public',table:t,filter:'battle_id=eq.'+B.id},()=>load()).subscribe());
+ if(fxCh)sb.removeChannel(fxCh);
+ fxCh=sb.channel('fx_'+B.id,{config:{broadcast:{self:false}}}).on('broadcast',{event:'fx'},m=>{const p=m.payload;if(p&&me&&p.to===me.id)playFx(p.fx)}).subscribe();
  if(!subbed){subbed=true;setInterval(settle,60000);setInterval(loadGames,60000)}
  settle();
 }
@@ -269,7 +277,7 @@ function view(){
   :`<div class="row"><div><div style="font-size:14px;font-weight:600">${g.a} @ ${g.h}</div><div class="mut">${sub}</div></div>${post?'':ch?`<button class="btn" disabled style="width:96px;background:#262b35;color:#6b7280;cursor:not-allowed">${ch.status==='pending'?'Pending':'Locked in'}</button>`:`<button class="btn" style="width:96px;background:#4cc38a;color:#06210f" onclick="pick('${g.id}')">Pick</button>`}</div>`
  }).join(''):'<div class="mut">No games on this date.</div>';
  A.innerHTML=`
- <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="num" style="font-size:28px;letter-spacing:.04em">BET DUEL</div><div class="mut">Season ${esc(B.season)} · ${esc(B.name)}</div></div>
+ <div style="display:flex;justify-content:space-between;align-items:center"><div><div class="num" onclick="secretTap()" style="font-size:28px;letter-spacing:.04em;user-select:none;-webkit-user-select:none">BET DUEL</div><div class="mut">Season ${esc(B.season)} · ${esc(B.name)}</div></div>
  <button aria-label="Notifications" onclick="document.getElementById('inbox')&&document.getElementById('inbox').scrollIntoView({behavior:'smooth'})" style="position:relative;width:44px;height:44px;border-radius:12px;border:1px solid #262b35;background:#181b22;color:#e9ecf1"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0"/></svg>${inbox.length?`<span style="position:absolute;top:-4px;right:-4px;min-width:20px;height:20px;border-radius:10px;background:#e5484d;color:#fff;font:600 12px 'Barlow';display:flex;align-items:center;justify-content:center">${inbox.length}</span>`:''}</button></div>
  ${opp?'':`<div class="card" style="border-color:#3aa0ff"><p class="lbl">Waiting for Player 2</p><div class="mut" style="margin-bottom:10px">Send them the invite link:</div><button class="btn" style="width:100%;background:#3aa0ff;color:#001a33" onclick="cp(location.origin+location.pathname+'?join=${B.invite_code}')">Copy invite link</button></div>`}
  <div class="card"><p class="lbl">Duel · Net profit</p><div style="display:flex;justify-content:space-between;align-items:flex-end">
@@ -289,6 +297,59 @@ function view(){
  ${battlesCard}`;
  if(aw)updRes();
  if(f){const i=$('#aq');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}}
+}
+// ---------- trashtalk fx (secret: tap the BET DUEL title 5x) ----------
+let fxCh=null,fxLast=0,fxTaps=[];
+const FX=[
+ {id:'l',icon:'🔴',label:'Giant L',t:'stamp',txt:'L'},
+ {id:'ez',icon:'😴',label:'EZ',t:'banner',txt:'EZ 😴'},
+ {id:'trash',icon:'🗑️',label:'Basura',t:'rain',em:['🗑️','😭'],txt:'BASURA'},
+ {id:'fire',icon:'🔥',label:'Sunog',t:'rise',em:['🔥'],txt:'SUNOG!'},
+ {id:'clown',icon:'🤡',label:'Clown',t:'rise',em:['🤡'],txt:'CLOWN'},
+ {id:'skull',icon:'💀',label:'Patay',t:'rain',em:['💀'],txt:'PATAY'},
+ {id:'money',icon:'💸',label:'Bye pera',t:'rain',em:['💸'],txt:'BYE PERA'},
+ {id:'brick',icon:'🧱',label:'Brick',t:'rain',em:['🧱'],txt:'BRICK!'},
+ {id:'cold',icon:'🥶',label:'Cold hand',t:'rain',em:['❄️','🥶'],txt:'COLD HAND'},
+ {id:'gg',icon:'🎉',label:'GG',t:'rain',em:['🎉','🏆','✨'],txt:'GG'},
+ {id:'shake',icon:'💥',label:'Shake',t:'shake',txt:'OUCH'},
+ {id:'cry',icon:'😭',label:'Iyak',t:'stamp',txt:'😭'},
+ {id:'air',icon:'🏀',label:'Airball',t:'banner',txt:'AIRBALL 🏀'},
+ {id:'poop',icon:'💩',label:'Amoy talo',t:'rain',em:['💩'],txt:'AMOY TALO'},
+ {id:'sleep',icon:'💤',label:'Antok',t:'rain',em:['💤','😴'],txt:'ANTOK NA?'}
+];
+function playFx(id){
+ const f=FX.find(x=>x.id===id);if(!f)return;
+ const old=document.getElementById('fxo');if(old)old.remove();
+ const o=document.createElement('div');o.id='fxo';
+ o.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer';
+ const T="font-family:'Barlow Condensed',sans-serif;font-weight:700;text-shadow:0 0 24px #000;";
+ let h='';
+ if(f.t==='rain'||f.t==='rise')for(let i=0;i<36;i++)h+=`<span style="position:absolute;left:${Math.random()*95}vw;top:0;font-size:${24+Math.random()*28}px;animation:${f.t==='rain'?'fxfall':'fxrise'} ${2+Math.random()*2.5}s linear ${Math.random()*1.5}s both">${f.em[i%f.em.length]}</span>`;
+ if(f.t==='stamp')h+=`<div style="${T}font-size:${f.txt.length>2?30:55}vw;line-height:1;color:#e5484d;animation:fxstamp .7s ease-out both">${f.txt}</div>`;
+ else if(f.t==='banner')h+=`<div style="${T}position:absolute;white-space:nowrap;font-size:18vw;color:#fff;animation:fxslide 3s linear both">${f.txt}</div>`;
+ else h+=`<div style="${T}position:relative;font-size:16vw;color:#fff;text-align:center;animation:fxpop .6s ease-out both">${f.txt}</div>`;
+ h+='<div style="position:absolute;bottom:18px;font-size:12px;color:#ccc">tap to close</div>';
+ o.innerHTML=h;o.onclick=()=>o.remove();document.body.appendChild(o);
+ if(f.t==='shake'){document.body.style.animation='fxshk .5s 3';setTimeout(()=>document.body.style.animation='',1600)}
+ setTimeout(()=>o.remove(),4500);
+}
+function secretTap(){const n=Date.now();fxTaps=fxTaps.filter(t=>n-t<2000);fxTaps.push(n);if(fxTaps.length>=5){fxTaps=[];fxMenu()}}
+function fxMenu(){
+ if(!opp)return alert('Wait for Player 2 to join first');
+ const m=document.createElement('div');m.id='fxm';
+ m.style.cssText='position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center';
+ m.innerHTML=`<div style="width:100%;max-width:480px;background:#181b22;border-radius:16px 16px 0 0;padding:16px;max-height:80vh;overflow-y:auto"><p class="lbl">Trashtalk · ${esc(opp.name)} lang ang makakakita</p><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${FX.map(f=>`<button class="tab" style="min-width:0;padding:0 4px;color:#e9ecf1" onclick="sendFx('${f.id}')">${f.icon} ${f.label}</button>`).join('')}</div><label class="mut" style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="fxp" style="width:auto;height:auto;margin:0"> Preview muna sa screen ko</label><button class="btn" style="width:100%;background:#262b35;color:#e9ecf1" onclick="document.getElementById('fxm').remove()">Close</button></div>`;
+ m.onclick=e=>{if(e.target===m)m.remove()};document.body.appendChild(m);
+}
+function sendFx(id){
+ if(document.getElementById('fxp').checked)return playFx(id);
+ if(Date.now()-fxLast<8000)return alert('Sandali lang bago ulit (8 sec)');
+ if(!fxCh)return alert('Not connected yet');
+ fxLast=Date.now();
+ fxCh.send({type:'broadcast',event:'fx',payload:{to:opp.id,fx:id}});
+ const t=document.createElement('div');t.textContent='Sent!';
+ t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#4cc38a;color:#06210f;padding:10px 18px;border-radius:10px;font:600 14px Barlow,sans-serif;z-index:10000';
+ document.body.appendChild(t);setTimeout(()=>t.remove(),1500);
 }
 boot();
 </script></body></html>
