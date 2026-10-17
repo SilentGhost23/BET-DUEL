@@ -28,7 +28,7 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const peso=n=>(n<0?'-':'')+'₱'+Math.abs(n).toLocaleString('en-PH');
 const gen=n=>{const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',a=new Uint8Array(n);crypto.getRandomValues(a);return[...a].map(x=>c[x%c.length]).join('')};
 const fmt=c=>c.replace(/(.{4})(?=.)/g,'$1-');
-let me,opp,B,bets=[],chs=[],games=[],day=0,sel=null,per='week',hf='all',subbed=false;
+let me,opp,B,bets=[],chs=[],games=[],day=0,sel=null,per='week',hf='all',picks=[],stakes=[],results=[],pays=[],dr={mvp:[],roy:[]},damt={mvp:500,roy:500},aw=null,am='pick',aq='',NBA=[],subbed=false;
 const col=p=>p&&p.color==='blue'?'#6db8ff':'#ff9a5c';
 const dkey=i=>{const d=new Date();d.setDate(d.getDate()+i);return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0')};
 const dlbl=i=>{if(!i)return'Today';const d=new Date();d.setDate(d.getDate()+i);return d.toLocaleDateString('en-PH',{month:'short',day:'numeric'})};
@@ -71,7 +71,7 @@ async function boot(){
  const {data:b}=await sb.from('battles').select('*').eq('id',p.battle_id).single();B=b;
  await load();await loadGames();
  if(!subbed){subbed=true;
-  ['challenges','bets'].forEach(t=>sb.channel('bd_'+t).on('postgres_changes',{event:'*',schema:'public',table:t,filter:'battle_id=eq.'+B.id},()=>load()).subscribe());
+  ['challenges','bets','award_picks','award_stakes','award_results','award_payouts'].forEach(t=>sb.channel('bd_'+t).on('postgres_changes',{event:'*',schema:'public',table:t,filter:'battle_id=eq.'+B.id},()=>load()).subscribe());
   setInterval(settle,60000);setInterval(loadGames,60000);
  }
  settle();
@@ -79,8 +79,8 @@ async function boot(){
 async function load(){
  const {data:ps}=await sb.from('players').select('*').eq('battle_id',B.id);
  opp=ps.find(x=>x.id!==me.id);
- const [b,c]=await Promise.all([sb.from('bets').select('*').eq('battle_id',B.id),sb.from('challenges').select('*').eq('battle_id',B.id).order('created_at',{ascending:false})]);
- bets=b.data||[];chs=c.data||[];view();
+ const [b,c,pk,st,rs,py]=await Promise.all([sb.from('bets').select('*').eq('battle_id',B.id),sb.from('challenges').select('*').eq('battle_id',B.id).order('created_at',{ascending:false}),sb.from('award_picks').select('*').eq('battle_id',B.id),sb.from('award_stakes').select('*').eq('battle_id',B.id),sb.from('award_results').select('*').eq('battle_id',B.id),sb.from('award_payouts').select('*').eq('battle_id',B.id)]);
+ bets=b.data||[];chs=c.data||[];picks=pk.data||[];stakes=st.data||[];results=rs.data||[];pays=py.data||[];view();
 }
 async function loadGames(){
  try{const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+dkey(day)).then(r=>r.json());
@@ -126,6 +126,64 @@ async function answer(id,ok){
 }
 function cp(t){navigator.clipboard.writeText(t).then(()=>alert('Copied'))}
 
+// ---------- awards ----------
+async function loadNBA(){
+ if(NBA.length)return;
+ try{const c=JSON.parse(localStorage.bd_nba||'null');if(c&&Date.now()-c.t<6048e5&&c.list.length){NBA=c.list;return}}catch(e){}
+ try{
+  const t=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams').then(r=>r.json());
+  const ids=t.sports[0].leagues[0].teams.map(x=>x.team.id);
+  const rs=await Promise.all(ids.map(id=>fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/'+id+'/roster').then(r=>r.json()).catch(()=>null)));
+  const L=[];
+  rs.forEach(r=>{if(!r)return;const ab=r.team&&r.team.abbreviation;(r.athletes||[]).forEach(a=>L.push({id:String(a.id),name:a.displayName,team:ab,pos:a.position&&a.position.abbreviation,rookie:!!(a.experience&&a.experience.years===0)}))});
+  NBA=L.sort((a,b)=>a.name.localeCompare(b.name));
+  localStorage.bd_nba=JSON.stringify({t:Date.now(),list:NBA});
+ }catch(e){NBA=[]}
+}
+function openAw(k){aw=k;am='pick';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
+function updRes(){
+ const el=$('#awres');if(!el)return;
+ if(!NBA.length){el.innerHTML='<div class="mut">Loading players...</div>';return}
+ const q=aq.toLowerCase();let L=NBA;
+ if(aw==='roy'){const r=L.filter(x=>x.rookie);L=r.length?r:L}
+ L=L.filter(x=>x.name.toLowerCase().includes(q)).slice(0,8);
+ const taken=am==='pick'?dr[aw].map(d=>d.id):[];
+ el.innerHTML=L.map(x=>{const t=taken.includes(x.id);return`<button class="row" style="border:0;color:#e9ecf1;text-align:left;cursor:pointer;min-height:44px;width:100%;${t?'opacity:.4':''}" ${t?'disabled':''} onclick="pickRes('${x.id}')"><span style="font-weight:600">${esc(x.name)}</span><span class="mut">${esc(x.team||'')}${x.pos?' · '+esc(x.pos):''}</span></button>`}).join('')||'<div class="mut">No match</div>';
+}
+function openWin(k){aw=k;am='win';aq='';view();loadNBA().then(updRes);setTimeout(()=>{const i=$('#aq');i&&i.focus()},50)}
+function pickRes(id){am==='win'?declare(id):addDraft(id)}
+function addDraft(id){
+ const x=NBA.find(y=>y.id===id),d=dr[aw];
+ if(d.length>=3)return alert('Max 3 picks');
+ if(!d.some(y=>y.id===id))d.push({id:x.id,name:x.name});
+ aw=null;view();
+}
+function rmDraft(k,id){dr[k]=dr[k].filter(x=>x.id!==id);view()}
+async function lockAw(k){
+ const lbl=k==='mvp'?'MVP':'Rookie of the Year',amt=Number(damt[k]),d=dr[k];
+ if(!d.length)return alert('Add at least 1 player');if(!(amt>0))return alert('Enter an amount');
+ if(!confirm('Lock '+d.map(x=>x.name).join(', ')+' for '+lbl+' with '+peso(amt)+'? Final na, hindi na mababago.'))return;
+ const s=await sb.from('award_stakes').insert({battle_id:B.id,player_id:me.id,award:k,amount:amt}).select().single();
+ if(s.error)return alert(s.error.message);
+ const r=await sb.from('award_picks').insert(d.map(x=>({battle_id:B.id,player_id:me.id,award:k,nba_player_id:x.id,nba_player_name:x.name})));
+ if(r.error){await sb.from('award_stakes').delete().eq('id',s.data.id);return alert(r.error.message)}
+ dr[k]=[];load();
+}
+async function declare(id){
+ const x=NBA.find(y=>y.id===id),k=aw,lbl=k==='mvp'?'MVP':'Rookie of the Year';
+ if(!confirm('Declare '+x.name+' as the '+lbl+' winner? Final na ito para sa dalawa.'))return;
+ const ids=pid=>picks.filter(p=>p.award===k&&p.player_id===pid).map(p=>p.nba_player_id);
+ const ms=stakes.find(s=>s.award===k&&s.player_id===me.id),os=opp&&stakes.find(s=>s.award===k&&s.player_id===opp.id);
+ const amt=ms&&os?Math.min(Number(ms.amount),Number(os.amount)):0;
+ const mh=ids(me.id).includes(id),oh=opp?ids(opp.id).includes(id):false,tabla=!amt||mh===oh;
+ const r=await sb.from('award_results').insert({battle_id:B.id,award:k,nba_player_id:x.id,nba_player_name:x.name,declared_by:me.id});
+ if(r.error)return alert(r.error.code==='23505'?'Winner already declared':r.error.message);
+ const rows=[{battle_id:B.id,award:k,player_id:me.id,result:tabla?'tabla':mh?'won':'lost',profit:tabla?0:mh?amt:-amt}];
+ if(opp)rows.push({battle_id:B.id,award:k,player_id:opp.id,result:tabla?'tabla':oh?'won':'lost',profit:tabla?0:oh?amt:-amt});
+ const p=await sb.from('award_payouts').insert(rows);if(p.error)alert(p.error.message);
+ aw=null;load();
+}
+
 // ---------- view ----------
 function stat(pid,p){
  const n=new Date();let f=null;
@@ -133,10 +191,12 @@ function stat(pid,p){
  else if(p==='month')f=new Date(n.getFullYear(),n.getMonth(),1);else if(p==='year')f=new Date(n.getFullYear(),0,1);
  const b=bets.filter(x=>x.player_id===pid&&(x.status==='won'||x.status==='lost')&&(!f||new Date(x.game_date)>=f));
  const inc=b.filter(x=>x.status==='won').reduce((s,x)=>s+Number(x.amount),0),lost=b.filter(x=>x.status==='lost').reduce((s,x)=>s+Number(x.amount),0);
- return{w:b.filter(x=>x.status==='won').length,l:b.filter(x=>x.status==='lost').length,inc,lost,net:inc-lost,stake:inc+lost};
+ const pp=pays.filter(x=>x.player_id===pid&&(!f||new Date(x.created_at)>=f)),pi=pp.filter(x=>Number(x.profit)>0).reduce((a,x)=>a+Number(x.profit),0),pl=pp.filter(x=>Number(x.profit)<0).reduce((a,x)=>a-Number(x.profit),0);
+ return{w:b.filter(x=>x.status==='won').length,l:b.filter(x=>x.status==='lost').length,inc:inc+pi,lost:lost+pl,net:inc+pi-lost-pl,stake:inc+lost+pi+pl};
 }
 function view(){
  if(!me)return;
+ const f=document.activeElement&&document.activeElement.id==='aq';
  const inbox=chs.filter(c=>c.to_player===me.id&&c.status==='pending'),out=chs.filter(c=>c.from_player===me.id&&c.status==='pending');
  const nm=opp?opp.name:'Player 2',sm=stat(me.id,'career'),so=opp?stat(opp.id,'career'):{net:0},S=sm.stake||0;
  const pm=S?Math.round(50+50*sm.net/S):50,lead=Math.abs(sm.net);
@@ -144,7 +204,24 @@ function view(){
  const nets=n=>`<span class="${n>=0?'g':'r'}">${n>=0?'+':''}${peso(n)}</span>`;
  const kind=c=>{if(c.status==='pending')return'pending';if(c.status==='rejected')return'done';const m=bets.find(b=>b.challenge_id===c.id&&b.player_id===me.id);return(!m||m.status==='open')?'locked':'done'};
  const cnt={all:chs.length,pending:chs.filter(c=>kind(c)==='pending').length,locked:chs.filter(c=>kind(c)==='locked').length,done:chs.filter(c=>kind(c)==='done').length},fl=chs.filter(c=>hf==='all'||kind(c)===hf);
- const hist=chs.length?`<div class="card"><p class="lbl">Duels · Bets</p><div style="display:flex;gap:6px;margin-bottom:12px">${[['all','All'],['pending','Pending'],['locked','Locked in'],['done','Done']].map(([k,l])=>`<button class="tab ${hf===k?'on':''}" style="flex:1;min-width:0;padding:0 4px" onclick="hf='${k}';view()">${l} ${cnt[k]}</button>`).join('')}</div><div style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:4px">${fl.slice(0,100).map(c=>{
+ const may=new Date().getMonth()===4&&new Date().getDate()>=15;
+ const awb=(k,l)=>{
+  const mine=picks.filter(p=>p.award===k&&p.player_id===me.id),th=picks.filter(p=>p.award===k&&p.player_id!==me.id);
+  const ms=stakes.find(s=>s.award===k&&s.player_id===me.id),os=opp&&stakes.find(s=>s.award===k&&s.player_id===opp.id);
+  const res=results.find(r=>r.award===k),pay=pays.find(p=>p.award===k&&p.player_id===me.id),locked=mine.length>0,d=dr[k];
+  const chip=(t,c,x)=>`<span style="display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:16px;border:1px solid ${c};color:${c};font-size:13px;font-weight:600">${esc(t)}${x||''}</span>`;
+  const none='<span class="mut">Wala pa</span>';
+  const search=m=>aw===k&&am===m?`<div style="margin-top:10px"><input id="aq" placeholder="Search player..." value="${esc(aq)}" oninput="aq=this.value;updRes()" style="margin-bottom:6px"><div id="awres" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto"></div><button class="btn" style="width:100%;background:transparent;color:#8b93a1;margin-top:6px" onclick="aw=null;view()">Close</button></div>`:'';
+  const head=locked?`<span class="mut">Locked · <b style="color:#e9ecf1">${peso(Number(ms?ms.amount:0))}</b></span>`:d.length<3?`<button aria-label="Add ${l} pick" class="btn" style="width:44px;padding:0;background:transparent;border:1px dashed #ff7a2f;color:#ff9a5c;font-size:22px" onclick="openAw('${k}')">+</button>`:'<span class="mut">Max 3</span>';
+  const myChips=locked?mine.map(p=>chip(p.nba_player_name,col(me))).join(''):d.map(x=>chip(x.name,col(me),`<button aria-label="Remove" onclick="rmDraft('${k}','${x.id}')" style="border:0;background:transparent;color:inherit;font-size:16px;padding:0;cursor:pointer">×</button>`)).join('')||none;
+  const lockBox=!locked&&d.length?`<div style="margin-top:10px"><p class="lbl" style="margin-bottom:6px">Amount</p><input id="amt_${k}" type="number" inputmode="numeric" value="${damt[k]}" oninput="damt['${k}']=this.value"><button class="btn" style="width:100%;background:#ff7a2f;color:#1a0b00" onclick="lockAw('${k}')">Lock picks (final)</button></div>`:'';
+  const outcome=res?`<div style="margin-top:10px;font-size:13px">Winner: <b>${esc(res.nba_player_name)}</b> · ${!pay||pay.result==='tabla'?'<span class="mut">Tabla</span>':pay.result==='won'?`<span class="g">You won ${peso(Number(pay.profit))}</span>`:`<span class="r">You lost ${peso(-Number(pay.profit))}</span>`}</div>`
+   :`${may?'<div style="margin-top:10px;font-size:12px;color:#ff9a5c">Mid-to-late May na, i-declare na ang winner.</div>':''}<button class="btn" style="width:100%;margin-top:10px;background:${may?'#4cc38a':'#262b35'};color:${may?'#06210f':'#e9ecf1'}" onclick="openWin('${k}')">Declare winner</button>${search('win')}`;
+  return`<div style="background:#0f1115;border-radius:10px;padding:10px;margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font-size:13px;font-weight:600">${l}</div>${head}</div>
+  <div class="mut" style="margin-bottom:4px;color:${col(me)}">${esc(me.name)}</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${myChips}</div>${search('pick')}${lockBox}
+  <div class="mut" style="margin:10px 0 4px;color:${col(opp)}">${esc(nm)}${os?' · '+peso(Number(os.amount)):''}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${th.map(p=>chip(p.nba_player_name,col(opp))).join('')||none}</div>${outcome}</div>`};
+ const awardsHtml=`<p class="lbl">Season awards · Final picks</p>`+awb('mvp','MVP')+awb('roy','Rookie of the Year');
+ const hist=`<div class="card">${awardsHtml}<p class="lbl">Duels · Bets</p><div style="display:flex;gap:6px;margin-bottom:12px">${[['all','All'],['pending','Pending'],['locked','Locked in'],['done','Done']].map(([k,l])=>`<button class="tab ${hf===k?'on':''}" style="flex:1;min-width:0;padding:0 4px" onclick="hf='${k}';view()">${l} ${cnt[k]}</button>`).join('')}</div><div style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-right:4px">${fl.slice(0,100).map(c=>{
   const bm=bets.filter(b=>b.challenge_id===c.id),mb=bm.find(b=>b.player_id===me.id),ob=bm.find(b=>b.player_id!==me.id),mine=c.from_player===me.id,amt=peso(Number(c.amount));
   const when=new Date(c.game_date).toLocaleDateString('en-PH',{month:'short',day:'numeric'})+' · '+new Date(c.game_date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
   let st,pk;
@@ -152,7 +229,7 @@ function view(){
   else if(c.status==='rejected'){st='<span class="mut">Rejected</span>';pk=`${esc(mine?me.name:nm)}: ${c.from_team}`}
   else{st=!mb?'Accepted':mb.status==='won'?`<span class="g">You won ${amt}</span>`:mb.status==='lost'?`<span class="r">You lost ${amt}</span>`:'<span style="color:#4cc38a">Locked in · waiting for final</span>';
    pk=mb&&ob?`${esc(me.name)}: ${mb.team} · ${esc(nm)}: ${ob.team}`:`${esc(mine?me.name:nm)}: ${c.from_team}`}
-  return`<div class="row" style="align-items:flex-start;${c.status==='rejected'?'opacity:.55':''}"><div><div style="font-size:14px;font-weight:600">${c.away_team} @ ${c.home_team} · ${amt}</div><div class="mut">${when}</div><div class="mut">${pk}</div></div><div style="font-size:13px;font-weight:600;text-align:right">${st}</div></div>`}).join('')||'<div class="mut">Wala pa dito.</div>'}</div></div>`:'';
+  return`<div class="row" style="align-items:flex-start;${c.status==='rejected'?'opacity:.55':''}"><div><div style="font-size:14px;font-weight:600">${c.away_team} @ ${c.home_team} · ${amt}</div><div class="mut">${when}</div><div class="mut">${pk}</div></div><div style="font-size:13px;font-weight:600;text-align:right">${st}</div></div>`}).join('')||'<div class="mut">Wala pa dito.</div>'}</div></div>`;
  const sched=games.length?games.map(g=>{
   const live=g.state==='in',post=g.state==='post',t=new Date(g.date).toLocaleTimeString('en-PH',{hour:'numeric',minute:'2-digit'});
   const sub=post?`Final · ${g.a} ${g.as} – ${g.h} ${g.hs}`:live?`<span class="r">Live · ${esc(g.detail)}</span> · ${g.a} ${g.as} – ${g.h} ${g.hs}`:t;
@@ -184,6 +261,8 @@ function view(){
   <div style="display:flex;flex-direction:column;gap:10px">${sched}</div></div>
  <div class="card"><p class="lbl">My sync code</p><div class="num" style="font-size:26px;letter-spacing:.06em">${fmt(me.sync_code)}</div><div class="mut" style="margin:6px 0 10px">Ilagay ito sa "Have a sync code?" sa bagong device.</div>
   <div style="display:flex;gap:10px"><button class="btn" style="flex:1;background:#262b35;color:#e9ecf1" onclick="cp('${me.sync_code}')">Copy code</button>${me.slot===1?`<button class="btn" style="flex:1;background:#262b35;color:#e9ecf1" onclick="cp(location.origin+location.pathname+'?join=${B.invite_code}')">Copy invite link</button>`:''}</div></div>`;
+ if(aw)updRes();
+ if(f){const i=$('#aq');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length)}}
 }
 boot();
 </script></body></html>
