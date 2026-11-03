@@ -84,7 +84,9 @@ async function boot(){
  chans.forEach(c=>sb.removeChannel(c));
  chans=['challenges','bets','award_picks','award_stakes','award_results','award_payouts'].map(t=>sb.channel('bd_'+t+'_'+Date.now()).on('postgres_changes',{event:'*',schema:'public',table:t,filter:'battle_id=eq.'+B.id},()=>load()).subscribe());
  if(fxCh)sb.removeChannel(fxCh);
- fxCh=sb.channel('fx_'+B.id,{config:{broadcast:{self:false}}}).on('broadcast',{event:'fx'},m=>{const p=m.payload;if(p&&me&&p.to===me.id)playFx(p.fx)}).subscribe();
+ fxCh=sb.channel('fxin_'+me.id+'_'+Date.now()).on('postgres_changes',{event:'INSERT',schema:'public',table:'trash_fx',filter:'to_player=eq.'+me.id},m=>pushFx(m.new)).subscribe();
+ try{const {data:un}=await sb.from('trash_fx').select('*').eq('to_player',me.id).eq('seen',false).order('created_at',{ascending:false}).limit(5);
+  if(un&&un.length){await sb.from('trash_fx').update({seen:true}).eq('to_player',me.id).eq('seen',false);if(un.length>1)fxToast(un.length+' trashtalk na dumating habang wala ka 😈');un.reverse().forEach(r=>fxQ.push(r.fx));runQ()}}catch(e){}
  if(!subbed){subbed=true;setInterval(settle,60000);setInterval(loadGames,60000)}
  settle();
 }
@@ -95,9 +97,13 @@ async function load(){
  bets=b.data||[];chs=c.data||[];picks=pk.data||[];stakes=st.data||[];results=rs.data||[];pays=py.data||[];view();
 }
 async function loadGames(){
- try{const r=await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+dkey(day)).then(r=>r.json());
- games=(r.events||[]).map(e=>{const c=e.competitions[0].competitors,h=c.find(x=>x.homeAway==='home'),a=c.find(x=>x.homeAway==='away');
-  return{id:e.id,date:e.date,state:e.status.type.state,detail:e.status.type.shortDetail,h:h.team.abbreviation,a:a.team.abbreviation,hs:h.score,as:a.score}});
+ try{
+  const get=k=>fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates='+k).then(r=>r.json()).then(r=>r.events||[]).catch(()=>[]);
+  const [p,q]=await Promise.all([get(dkey(day-1)),get(dkey(day))]);
+  const T=new Date();T.setDate(T.getDate()+day);const ds=T.toDateString(),M=new Map();
+  [...p,...q].forEach(e=>{if(new Date(e.date).toDateString()===ds)M.set(e.id,e)});
+  games=[...M.values()].sort((x,y)=>new Date(x.date)-new Date(y.date)).map(e=>{const c=e.competitions[0].competitors,h=c.find(x=>x.homeAway==='home'),a=c.find(x=>x.homeAway==='away');
+   return{id:e.id,date:e.date,state:e.status.type.state,detail:e.status.type.shortDetail,h:h.team.abbreviation,a:a.team.abbreviation,hs:h.score,as:a.score}});
  }catch(e){games=[]}
  view();
 }
@@ -317,9 +323,9 @@ const FX=[
  {id:'poop',icon:'💩',label:'Amoy talo',t:'rain',em:['💩'],txt:'AMOY TALO'},
  {id:'sleep',icon:'💤',label:'Antok',t:'rain',em:['💤','😴'],txt:'ANTOK NA?'}
 ];
-function playFx(id){
- const f=FX.find(x=>x.id===id);if(!f)return;
- const old=document.getElementById('fxo');if(old)old.remove();
+function playFx(id,done){
+ const f=FX.find(x=>x.id===id);if(!f){done&&done();return}
+ const old=document.getElementById('fxo');if(old){old._end?old._end():old.remove()}
  const o=document.createElement('div');o.id='fxo';
  o.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.5);overflow:hidden;display:flex;align-items:center;justify-content:center;cursor:pointer';
  const T="font-family:'Barlow Condensed',sans-serif;font-weight:700;text-shadow:0 0 24px #000;";
@@ -329,9 +335,9 @@ function playFx(id){
  else if(f.t==='banner')h+=`<div style="${T}position:absolute;white-space:nowrap;font-size:18vw;color:#fff;animation:fxslide 3s linear both">${f.txt}</div>`;
  else h+=`<div style="${T}position:relative;font-size:16vw;color:#fff;text-align:center;animation:fxpop .6s ease-out both">${f.txt}</div>`;
  h+='<div style="position:absolute;bottom:18px;font-size:12px;color:#ccc">tap to close</div>';
- o.innerHTML=h;o.onclick=()=>o.remove();document.body.appendChild(o);
+ const end=()=>{if(!o.isConnected)return;o.remove();done&&done()};o._end=end;o.innerHTML=h;o.onclick=end;document.body.appendChild(o);
  if(f.t==='shake'){document.body.style.animation='fxshk .5s 3';setTimeout(()=>document.body.style.animation='',1600)}
- setTimeout(()=>o.remove(),4500);
+ setTimeout(end,4000);
 }
 function secretTap(){const n=Date.now();fxTaps=fxTaps.filter(t=>n-t<2000);fxTaps.push(n);if(fxTaps.length>=5){fxTaps=[];fxMenu()}}
 function fxMenu(){
@@ -341,15 +347,17 @@ function fxMenu(){
  m.innerHTML=`<div style="width:100%;max-width:480px;background:#181b22;border-radius:16px 16px 0 0;padding:16px;max-height:80vh;overflow-y:auto"><p class="lbl">Trashtalk · ${esc(opp.name)} lang ang makakakita</p><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${FX.map(f=>`<button class="tab" style="min-width:0;padding:0 4px;color:#e9ecf1" onclick="sendFx('${f.id}')">${f.icon} ${f.label}</button>`).join('')}</div><label class="mut" style="display:flex;gap:8px;align-items:center;margin:12px 0"><input type="checkbox" id="fxp" style="width:auto;height:auto;margin:0"> Preview muna sa screen ko</label><button class="btn" style="width:100%;background:#262b35;color:#e9ecf1" onclick="document.getElementById('fxm').remove()">Close</button></div>`;
  m.onclick=e=>{if(e.target===m)m.remove()};document.body.appendChild(m);
 }
-function sendFx(id){
+let fxQ=[],fxBusy=false;
+function runQ(){if(fxBusy||!fxQ.length)return;fxBusy=true;playFx(fxQ.shift(),()=>{fxBusy=false;setTimeout(runQ,300)})}
+function pushFx(r){fxQ.push(r.fx);sb.from('trash_fx').update({seen:true}).eq('id',r.id);runQ()}
+function fxToast(t){const e=document.createElement('div');e.textContent=t;e.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#4cc38a;color:#06210f;padding:10px 18px;border-radius:10px;font:600 14px Barlow,sans-serif;z-index:10000;text-align:center;max-width:90vw';document.body.appendChild(e);setTimeout(()=>e.remove(),2800)}
+async function sendFx(id){
  if(document.getElementById('fxp').checked)return playFx(id);
  if(Date.now()-fxLast<8000)return alert('Sandali lang bago ulit (8 sec)');
- if(!fxCh)return alert('Not connected yet');
  fxLast=Date.now();
- fxCh.send({type:'broadcast',event:'fx',payload:{to:opp.id,fx:id}});
- const t=document.createElement('div');t.textContent='Sent!';
- t.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#4cc38a;color:#06210f;padding:10px 18px;border-radius:10px;font:600 14px Barlow,sans-serif;z-index:10000';
- document.body.appendChild(t);setTimeout(()=>t.remove(),1500);
+ const {error}=await sb.from('trash_fx').insert({battle_id:B.id,from_player:me.id,to_player:opp.id,fx:id});
+ if(error)return alert(error.message);
+ fxToast('Sent!');
 }
 boot();
 </script></body></html>
